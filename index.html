@@ -491,20 +491,37 @@
     </div>
   </div>
 
-  <!-- STEP 2: FOLDER NAVIGATION -->
+  <!-- STEP 2: FOLDER SELECTION -->
   <div class="card hidden" id="folder-section">
-    <div class="card-label">📁 Step 2 — Navigate to Result Folder</div>
+    <div class="card-label">📁 Step 2 — Select Result Folder</div>
     <div id="userInfoBar"></div>
-    <div class="folder-path" id="folderPath">
-      <span class="path-item">📂 My Drive</span>
+
+    <!-- QUICK FOLDERS -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:0.5px;">QUICK SELECT — YOUR IUB FOLDERS</div>
+      <div style="display:flex;flex-direction:column;gap:8px;" id="quickFolders">
+        <div class="folder-item" onclick="selectFolderById('1GpGvG23GredTeMW0HR7pmhLJlkad3LaZ','Old Posting')">
+          <span class="fi-icon">📁</span><span class="fi-name">Old Posting</span><span class="fi-arrow">›</span>
+        </div>
+      </div>
     </div>
-    <div id="folderLoading" class="empty-state hidden">
-      <div class="es-icon">⏳</div><p>Loading folders...</p>
+
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:0.5px;">— OR PASTE FOLDER LINK FROM GOOGLE DRIVE —</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input type="text" id="folderLinkInput" placeholder="Paste Google Drive folder link here..."
+        style="flex:1;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:10px;color:var(--white);font-family:'DM Mono',monospace;font-size:12px;padding:12px 14px;outline:none;">
+      <button class="btn btn-primary" onclick="useFolderLink()">Go →</button>
     </div>
-    <div class="folder-list" id="folderList"></div>
-    <div class="folder-actions">
-      <button class="btn btn-secondary" onclick="goBack()" id="backBtn" disabled>← Back</button>
-      <button class="btn btn-primary" onclick="selectThisFolder()">✅ Search in This Folder</button>
+    <div id="folderError" style="font-size:11px;color:var(--red);margin-top:8px;"></div>
+
+    <!-- SUBFOLDER NAVIGATION -->
+    <div id="subfolderNav" class="hidden" style="margin-top:16px;">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">SUBFOLDERS INSIDE: <span id="currentFolderLabel" style="color:var(--accent)"></span></div>
+      <div class="folder-list" id="folderList"></div>
+      <div class="folder-actions" style="margin-top:12px;">
+        <button class="btn btn-secondary" onclick="goBack()" id="backBtn">← Back</button>
+        <button class="btn btn-primary" onclick="selectThisFolder()">✅ Search Here</button>
+      </div>
     </div>
   </div>
 
@@ -623,70 +640,77 @@ function onSignedIn() {
         <span style="margin-left:auto;font-size:11px;color:var(--green);">✓ Drive Connected</span>
       </div>`;
   }
-
-  loadFolders('root');
 }
 
-// ─── FOLDER NAVIGATION ───────────────────────────────────
-async function loadFolders(parentId) {
+// ─── FOLDER SELECTION ────────────────────────────────────
+function useFolderLink() {
+  const input = document.getElementById('folderLinkInput').value.trim();
+  const errEl = document.getElementById('folderError');
+  errEl.textContent = '';
+
+  // Extract folder ID from link or use directly
+  let folderId = input;
+  const match = input.match(/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) folderId = match[1];
+
+  if (!folderId) {
+    errEl.textContent = 'Please paste a valid Google Drive folder link.';
+    return;
+  }
+
+  selectFolderById(folderId, 'Selected Folder');
+}
+
+async function selectFolderById(folderId, folderName) {
+  selectedFolderId = folderId;
+  selectedFolderName = folderName;
+  document.getElementById('currentFolderLabel').textContent = folderName;
+  document.getElementById('subfolderNav').classList.remove('hidden');
+  folderStack = [{ id: folderId, name: folderName }];
+  await loadSubfolders(folderId);
+}
+
+async function loadSubfolders(parentId) {
   const list = document.getElementById('folderList');
-  const loading = document.getElementById('folderLoading');
-  list.innerHTML = '';
-  loading.classList.remove('hidden');
+  list.innerHTML = `<div class="empty-state"><div class="es-icon">⏳</div><p>Loading...</p></div>`;
 
   try {
     const q = encodeURIComponent(`'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
     const res = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=50&fields=files(id,name)&orderBy=name`,
+      `https://www.googleapis.com/drive/v3/files?q=${q}&pageSize=100&fields=files(id,name)&orderBy=name`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     const data = await res.json();
-    loading.classList.add('hidden');
 
     if (!data.files || data.files.length === 0) {
-      list.innerHTML = `<div class="empty-state"><div class="es-icon">📂</div><p>No subfolders here.<br>You can select this folder to search in it.</p></div>`;
+      list.innerHTML = `<div class="empty-state"><div class="es-icon">📂</div><p>No subfolders here.<br>Tap "Search Here" to search in this folder.</p></div>`;
     } else {
+      list.innerHTML = '';
       data.files.forEach(f => {
         const item = document.createElement('div');
         item.className = 'folder-item';
         item.innerHTML = `<span class="fi-icon">📁</span><span class="fi-name">${f.name}</span><span class="fi-arrow">›</span>`;
-        item.onclick = () => openFolder(f.id, f.name);
+        item.onclick = () => openSubfolder(f.id, f.name);
         list.appendChild(item);
       });
     }
   } catch(e) {
-    loading.classList.add('hidden');
-    list.innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px;">Failed to load folders: ${e.message}</div>`;
+    list.innerHTML = `<div style="color:var(--red);font-size:12px;padding:12px;">Error: ${e.message}</div>`;
   }
 
-  updateFolderPath();
+  document.getElementById('currentFolderLabel').textContent = folderStack[folderStack.length-1].name;
   document.getElementById('backBtn').disabled = folderStack.length <= 1;
 }
 
-function openFolder(id, name) {
+function openSubfolder(id, name) {
   folderStack.push({ id, name });
-  loadFolders(id);
+  loadSubfolders(id);
 }
 
 function goBack() {
   if (folderStack.length <= 1) return;
   folderStack.pop();
-  loadFolders(folderStack[folderStack.length - 1].id);
-}
-
-function updateFolderPath() {
-  const path = document.getElementById('folderPath');
-  path.innerHTML = folderStack.map((f, i) => {
-    if (i < folderStack.length - 1) {
-      return `<span class="path-item" style="cursor:pointer;text-decoration:underline" onclick="navigateToIndex(${i})">${f.name}</span><span class="path-sep">›</span>`;
-    }
-    return `<span class="path-item">${f.name}</span>`;
-  }).join('');
-}
-
-function navigateToIndex(i) {
-  folderStack = folderStack.slice(0, i + 1);
-  loadFolders(folderStack[folderStack.length - 1].id);
+  loadSubfolders(folderStack[folderStack.length - 1].id);
 }
 
 function selectThisFolder() {
